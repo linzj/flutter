@@ -24,11 +24,46 @@ source_set("test_font") {
   }
 }
 
+declare_args() {
+  # A static library that answers the Dart C API in place of the Dart VM --
+  # dart2rust's translated program plus its own runtime, standing where
+  # `libdart_aotruntime` stands (route A: the engine's own code is unchanged).
+  # An absolute path to a `.a`; empty means the upstream VM.
+  dart2rust_vm_lib = ""
+}
+
+# Links the dart2rust VM instead of the Dart SDK's. The headers still come
+# from the Dart SDK (`:dart_api` is header-only): only the implementation of
+# the C API moves.
+config("dart2rust_vm") {
+  libs = [
+    dart2rust_vm_lib,
+
+    # What the Rust standard library in that archive needs from the sysroot.
+    "dl",
+    "pthread",
+    "m",
+    "rt",
+  ]
+}
+
 # Picks the libdart implementation based on the Flutter runtime mode.
 group("libdart") {
   public_deps = []
 
-  if (flutter_runtime_mode == "profile" || flutter_runtime_mode == "release") {
+  if (dart2rust_vm_lib != "") {
+    public_deps += [
+      "$dart_src/runtime:dart_api",
+
+      # Not the VM: `platform` is the Dart SDK's utility library (TextBuffer,
+      # Utils, ..), and the engine's own dart:io glue
+      # (`runtime/bin:common_embedder_dart_io`, which this build still links)
+      # is written against it. Only the VM moves.
+      "$dart_src/runtime/platform:libdart_platform_aotruntime",
+    ]
+    public_configs = [ ":dart2rust_vm" ]
+  } else if (flutter_runtime_mode == "profile" ||
+             flutter_runtime_mode == "release") {
     public_deps += [ "$dart_src/runtime:libdart_aotruntime" ]
   } else {
     public_deps += [
